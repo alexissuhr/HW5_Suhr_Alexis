@@ -1,0 +1,354 @@
+---
+title: "STAA 566 - Homework 5 - Shiny Project"
+author: "Alexis Suhr"
+date: "10 March 2022"
+output: html_document
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+---
+
+### Summary for Assignment
+
+**Create a Shiny dashboard to provide information on a topic of your choosing. You can use some of the figures/tables you made in the other assignment if you want (not required). The dashboard must include several figures/tables and some dynamic and/or interactive aspects. Describe:**
+
+**1. Motivation for this dashboard:**\
+I wanted to use a dataset that did not involve much modification so that I could focus this dashboard on the visualizations instead of cleaning the data, as I spent a lot of time on other assignments trying to clean the data before visualization.
+
+**2. What I'm trying to communicate:**
+
+Having been aware of the 'mpg' dataset, I decided to focus this dashboard on fuel emissions in the United States I chose the following datasets:
+
+(a) **'mpg' from the 'ggplot2' package**\
+    *(38 observations of popular car models' make, class, engine size, transmission, and fuel economy in 1999 and 2008)*
+
+(b) **'Transportation Energy-Related Carbon Dioxide Emissions' from the U.S. Energy Information Administration (EIA) website** *(CO2 emissions by U.S. state for the years 1980 - 2018)*
+
+**3. What options are available to the user:**
+Ability to view tables, maps, and scatterplots based on MPG and CO2 emissions data. Tooltips for interactive plots list multiple values and maps include tooltips for data. Rows in tables are highlighted when the cursor rolls over them.    
+
+**4. Why I chose each figure/table in the dashboard:**  
+I wanted to have a combination of interactive tables, plots, and maps for the user to see different vehicle efficiency/emissions data based on the years given in the 'mpg' dataset.  
+
+### Libraries, Packages
+
+```{r}
+###### 
+# Read in libraries to be used 
+###### 
+
+libs <- c('ggplot2',
+          'DataExplorer',
+          'tidyverse',
+          'plotly',
+          'readr',
+          'rworldmap',
+          'sf',
+          'rgeos',
+          'poliscidata',
+          'tigris',
+          'usmap',
+          'viridis',
+          'gridExtra',
+          'shiny',
+          'shinydashboard',
+          'babynames',
+          'kableExtra',
+          'R.utils',
+          'summarytools')
+
+
+for(l in libs){
+  suppressPackageStartupMessages(library(l,
+                                         quietly = TRUE,
+                                         character.only = TRUE))
+}
+```
+
+### Reading in Data to Be Used for Analysis
+
+```{r}
+FuelEconData <- ggplot2::mpg %>%
+  mutate(Manufacturer = as.factor(R.utils::capitalize(manufacturer)), 
+         
+         # Name of manufacturer
+         Model = as.factor(toupper(model)),
+         # Model of car
+         
+         EngineDisplacement = displ, 
+         # Liters of engine displacement (total volume of all the 
+         # cylinders in an engine)
+         
+         YearManufactured = as.factor(year), 
+         # Year manufactured
+         
+         NumCylinders = as.factor(cyl), 
+         # Number of engine cylinders (4, 5, 6, or 8)
+         
+         TransmissionType1 = as.factor(substr(R.utils::capitalize(trans), 1, nchar(trans)-4)),
+         TransmissionType2 = as.factor(toupper(substr(trans, nchar(trans)-2, nchar(trans)))),
+         # The above two variables are separating the 'trans' string 
+         # and capitalizing certain values to make the data look nicer
+         
+         TransmissionType = as.factor(paste0(TransmissionType1, " (", TransmissionType2)),
+         # Type of engine transmission
+         
+         DriveTrain = as.factor(case_when(drv =='f' ~ 'Front-Wheel',
+                                          drv == 'r' ~ 'Rear-Wheel',
+                                          drv == '4' ~ 'Four-Wheel')), 
+         # Type of Drive Train 
+         #(front-wheel, rear-wheel, 4-wheel)
+         
+         CityMPG = cty, 
+         # City fuel efficiency (mpg)
+         
+         HighwayMPG = hwy, 
+         # Highway fuel efficiency (mpg)
+         
+         FuelType = as.factor(case_when(fl == 'e' ~ 'Ethanol-85',
+                                        fl == 'd' ~ 'Diesel',
+                                        fl == 'r' ~ 'Regular',
+                                        fl == 'p' ~ 'Premium',
+                                        fl == 'c' ~'Methane (CNG)')), 
+         # Type of fuel used to run vehicle 
+         # (ethanol 85,diesel,regular,premium,compressed natural gas aka Methane/CNG)
+         CarType = as.factor(case_when(class == '2seater' ~ 'Two-Seater',
+                                       class == 'compact' ~ 'Compact',
+                                       class == 'midsize' ~ 'Midsize',
+                                       class == 'minivan' ~ 'Minivan',
+                                       class == 'pickup' ~ 'Pickup',
+                                       class == 'subcompact' ~ 'Subcompact',
+                                       class == 'suv' ~ 'SUV'))
+         # Type of car build 
+         # (2seater, compact, midsize, minivan, pickup, subcompact, suv)
+  ) %>% 
+  select(Manufacturer:CarType, 
+         -c(TransmissionType1, 
+            TransmissionType2)) %>%
+  filter(CarType != 'Two-Seater',
+         NumCylinders != '5')
+
+#####
+# CO2 emissions and Changes in CO2 emisions for 1999, 2008, 2015
+#####
+
+CO2EmissionsData <- read.csv("Datasets/CO2Emissions.csv") %>% 
+  mutate(state = state.abb[match(State, state.name)],
+         CO2_1999 = X1999,
+         CO2_2008 = X2008,
+         Change_1999_2008 = CO2_2008 - CO2_1999) %>%
+  select(state,
+         CO2_1999,
+         CO2_2008,
+         Change_1999_2008)
+```
+
+### Shiny Dashboard Creation
+
+```{r}
+header <- dashboardHeader(title = "Visualizing Fuel Efficiency and CO2 Emissions (1999 and 2008")
+
+sidebar <- dashboardSidebar(
+  sidebarMenu(
+    menuItem("Tables", 
+             tabName = "tables", 
+             icon = icon("table")),
+    menuItem("Plots", 
+             tabName = "plots", 
+             icon = icon("graph")),
+    menuItem("Maps", 
+             tabName = "maps", 
+             icon = icon("maps"))
+  )
+)
+
+body <- dashboardBody(
+  tabItems(
+    tabItem(tabName = "tables",
+            h2("Fuel Efficiency Table - 1999"),
+            box(dataTableOutput(SummaryTable_1999)),
+            h3("Fuel Efficiency Table - 2008"),
+            box(dataTableOutput(SummaryTable_2008)),
+            h3("CO2 Emissions Table"),
+            box(dataTableOutput(SummaryTable_CO2)),
+            ),
+    tabItem(tabName = "plots",
+            h2("City Fuel Efficiency (MPG) by Year"),
+            box(plotlyOutput(CityMPG_Scatterplot)),
+            h3("Highway Fuel Efficiency (MPG) by Year"),
+            box(plotlyOutput(HwyMPG_Scatterplot))
+            ),
+    tabItem(tabName = "maps",
+            h2("US CO2 Emmissions (1999)"),
+            box(plotlyOutput("C021999"), 
+                width= 500),
+            h3("US CO2 Emmissions (2008)"),
+            box(plotlyOutput("C022008"), 
+                width= 500))
+    
+  )
+)
+
+ui <- dashboardPage(skin = "grey",
+                    header, 
+                    sidebar, 
+                    body)
+server <- function(input, output) { }
+
+#####
+# TABLE OUTPUTS
+#####
+
+# mpg data 1999
+output$SummaryTable_1999 <- renderDataTable({
+  SummaryTable_1999 <- descr(FuelEconData %>%
+                               select(YearManufactured,
+                                      CityMPG, 
+                                      HighwayMPG) %>%
+                               filter(YearManufactured == '1999'))
+  
+  SummaryTable_1999[c(1:7, 9), ] %>%
+    kbl(caption = "Fuel Efficiency (1999)",
+        digits = 2,
+        col.names = c("City MPG",
+                      "Highway MPG")) %>%
+    kable_paper("hover",
+                full_width = F,
+                html_font = "Cambria")
+})
+
+# mpg data 2008
+output$SummaryTable_2008 <- renderDataTable({
+  SummaryTable_2008 <- descr(FuelEconData %>%
+                               select(YearManufactured,
+                                      CityMPG, 
+                                      HighwayMPG) %>%
+                               filter(YearManufactured == '2008'))
+  
+  
+  
+  SummaryTable_2008[c(1:7, 9), ] %>%
+    kbl(caption = "Fuel Efficiency (2008)",
+        digits = 2,
+        col.names = c("City MPG",
+                      "Highway MPG")) %>%
+    kable_paper("hover",
+                full_width = F,
+                html_font = "Cambria")
+})
+
+# CO2 emissions table
+output$SummaryTable_CO2 <- renderDataTable({
+  
+  SummaryTable_CO2 <- descr(CO2EmissionsData[c(2:4), ])
+  
+  
+  SummaryTable_CO2[c(1:7, 9), ] %>%
+    kbl(caption = "CO2 Emmissions by Year",
+        digits = 2,
+        col.names = c("1999",
+                      "2008",
+                      "(2008-1999)")) %>%
+    kable_paper("hover",
+                full_width = F,
+                html_font = "Cambria")
+  
+})
+
+#####
+# SCATTERPLOT OUTPUTS
+#####
+
+# Engine Displacement vs. City MPG
+output$CityMPG_Scatterplot <- renderPlotly({
+  CityMPG_Scatterplot <- ggplot(data = FuelEconData,
+                                aes(x = EngineDisplacement,
+                                    y = CityMPG,
+                                    color = YearManufactured,
+                                    label1 = CarType,
+                                    label2 = DriveTrain,
+                                    label3 = TransmissionType,
+                                    label4 = NumCylinders,
+                                    label5 = Model,
+                                    label6 = Manufacturer))+
+    geom_point()+
+    labs(title = "City Fuel Efficiency (MPG) vs. Total Cylinder Volume",
+         subtitle = "Plotted by Year Manufactured",
+         x = "Engine Displacement",
+         y = "City MPG",
+         color = "Year Manufactured")+
+    theme(legend.position = "none")+
+    facet_wrap(.~ YearManufactured,
+               scales = "fixed")
+  
+  ggplotly(CityMPG_Scatterplot)
+})
+
+# Engine Displacement vs. Highway MPG
+
+output$HwyMPG_Scatterplot <- renderPlotly({
+  
+  HwyMPG_Scatterplot <- ggplot(data = FuelEconData,
+                               aes(x = EngineDisplacement,
+                                   y = HighwayMPG,
+                                   color = YearManufactured,
+                                   label1 = CarType,
+                                   label2 = DriveTrain,
+                                   label3 = TransmissionType,
+                                   label4 = NumCylinders,
+                                   label5 = Model,
+                                   label6 = Manufacturer))+
+    geom_point()+
+    labs(title = "Highway Fuel Efficiency (MPG) vs. Total Cylinder Volume",
+         subtitle = "Plotted by Year Manufactured",
+         x = "Engine Displacement",
+         y = "Highway MPG",
+         color = "Year Manufactured")+
+    theme(legend.position = "none")+
+    facet_wrap(.~ YearManufactured,
+               scales = "fixed")
+  
+  ggplotly(HwyMPG_Scatterplot)
+})
+
+#####
+# MAP OUTPUTS
+#####
+
+# 1999 CO2 Emissions
+output$C021999 <- renderPlotly({
+  
+  CO21999_Map <- plot_usmap(data = CO2EmissionsData,
+                            values = "CO2_1999",
+                            color = "white") +
+    scale_fill_distiller(palette = "Reds",
+                         trans = "reverse",
+                         name = "CO2 Emissions\1999")+
+    theme(legend.position = "right")+
+    labs(title = "CO2 Emissions by State",
+         subtitle = "1999")
+  
+  ggplotly(CO21999_Map)
+})
+
+# 2008 CO2 Emissions
+output$C022008<- renderPlotly({
+  CO22008_Map <- plot_usmap(data = CO2EmissionsData,
+                            values = "CO2_1999",
+                            color = "white") +
+    scale_fill_distiller(palette = "Reds",
+                         trans = "reverse",
+                         name = "CO2 Emissions\n2008")+
+    theme(legend.position = "right")+
+    labs(title = "CO2 Emissions by State",
+         subtitle = "2008")
+  ggplotly(CO22008_Map)
+})
+
+
+shinyApp(ui, server)
+
+
+```
