@@ -1,8 +1,6 @@
 # HW5_Suhr_Alexis
 STAA 566 Assignment 5 - Shiny Project  
 
-STAA 566 Assignment 5 - Shiny Project
-
 Create a Shiny dashboard to provide information on a topic of your choosing. You can use some of the figures/tables you made in the other assignment if you want (not required). The dashboard must include several figures/tables and some dynamic and/or interactive aspects. Describe:
 
 the motivation for you dashboard what you are trying to communicate what options you give the user what you chose each figure/table in the dashboard
